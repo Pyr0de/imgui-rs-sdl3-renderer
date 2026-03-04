@@ -64,7 +64,7 @@ impl Error for RenderError {
 
 /// Represents the context for the renderer
 pub struct Renderer<'a> {
-    texture_map: imgui::Textures<sdl3::render::Texture<'a>>,
+    font_texture: sdl3::render::Texture<'a>,
     color_buffer: Vec<sdl3_sys::pixels::SDL_FColor>,
 }
 
@@ -98,8 +98,7 @@ impl<'a> Renderer<'a> {
         texture_creator: &'a sdl3::render::TextureCreator<impl std::any::Any>,
         imgui_context: &mut imgui::Context,
     ) -> Result<Self, RenderError> {
-        let mut texture_map = imgui::Textures::new();
-        Self::prepare_font_atlas(texture_creator, imgui_context, &mut texture_map)?;
+        let font_texture = Self::prepare_font_atlas(texture_creator, imgui_context)?;
 
         imgui_context.set_renderer_name(Some(format!(
             "imgui-rs-sdl3-renderer {}",
@@ -112,7 +111,7 @@ impl<'a> Renderer<'a> {
             .insert(imgui::BackendFlags::RENDERER_HAS_VTX_OFFSET);
 
         Ok(Self {
-            texture_map,
+            font_texture,
             color_buffer: Vec::new(),
         })
     }
@@ -145,10 +144,11 @@ impl<'a> Renderer<'a> {
     /// canvas.present();
     /// }
     /// ```
-    pub fn render(
+    pub fn render<'b>(
         &mut self,
         draw_data: &imgui::DrawData,
         canvas: &mut sdl3::render::Canvas<impl sdl3::render::RenderTarget>,
+        texture_map: &Vec<sdl3::render::Texture<'b>>,
     ) -> RenderResult {
         struct CanvasBackup {
             viewport: sdl3::rect::Rect,
@@ -176,7 +176,8 @@ impl<'a> Renderer<'a> {
                 match command {
                     imgui::DrawCmd::Elements { count, cmd_params } => {
                         Self::render_elements(
-                            &self.texture_map,
+                            texture_map,
+                            &self.font_texture,
                             &mut self.color_buffer,
                             canvas,
                             draw_list.vtx_buffer(),
@@ -204,8 +205,9 @@ impl<'a> Renderer<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn render_elements(
-        texture_map: &imgui::Textures<sdl3::render::Texture<'a>>,
+    fn render_elements<'b>(
+        texture_map: &Vec<sdl3::render::Texture<'b>>,
+        font_texture: &sdl3::render::Texture<'a>,
         color_buffer: &mut Vec<sdl3_sys::pixels::SDL_FColor>,
         canvas: &mut sdl3::render::Canvas<impl sdl3::render::RenderTarget>,
         vertex_buffer: &[imgui::DrawVert],
@@ -247,7 +249,10 @@ impl<'a> Renderer<'a> {
         );
         canvas.set_clip_rect(rect);
 
-        let texture = texture_map.get(*texture_id);
+        let texture = match texture_id.id() {
+            0 => Some(font_texture),
+            idx => texture_map.get(idx - 1),
+        };
         Self::render_raw_geometry(
             canvas,
             color_buffer,
@@ -266,7 +271,7 @@ impl<'a> Renderer<'a> {
     ) -> RenderResult {
         let vert_stride = size_of::<imgui::DrawVert>() as c_int;
         color_buffer.clear();
-        // Normalize colours to SDL_Fcolor format 
+        // Normalize colours to SDL_Fcolor format
         color_buffer.extend(vertices.iter().map(|vert| sdl3_sys::pixels::SDL_FColor {
             r: vert.col[0] as f32 / 255_f32,
             g: vert.col[1] as f32 / 255_f32,
@@ -314,11 +319,9 @@ impl<'a> Renderer<'a> {
     fn prepare_font_atlas(
         creator: &'a sdl3::render::TextureCreator<impl std::any::Any>,
         imgui_context: &mut imgui::Context,
-        texture_map: &mut imgui::Textures<sdl3::render::Texture<'a>>,
-    ) -> RenderResult {
+    ) -> Result<sdl3::render::Texture<'a>, RenderError> {
         let font_atlas = imgui_context.fonts().build_rgba32_texture();
-        let rgba32_format: sdl3::pixels::PixelFormat =
-            sdl3_sys::pixels::SDL_PixelFormat::RGBA32.try_into()?;
+        let rgba32_format = sdl3::pixels::PixelFormat::RGBA32;
         let mut font_texture =
             creator.create_texture_static(rgba32_format, font_atlas.width, font_atlas.height)?;
 
@@ -331,9 +334,6 @@ impl<'a> Renderer<'a> {
         font_texture.set_blend_mode(sdl3::render::BlendMode::Blend);
         font_texture.set_scale_mode(sdl3::render::ScaleMode::Linear);
 
-        let id = texture_map.insert(font_texture);
-        imgui_context.fonts().tex_id = id;
-        Ok(())
+        Ok(font_texture)
     }
 }
-
