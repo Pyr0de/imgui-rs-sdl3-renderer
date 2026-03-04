@@ -325,7 +325,7 @@ impl<'a> Renderer<'a> {
         font_texture.update(
             None,
             font_atlas.data,
-            rgba32_format.byte_size_of_pixels(font_atlas.width as usize),
+            rgba32_format.bytes_per_pixel() * font_atlas.width as usize,
         )?;
 
         font_texture.set_blend_mode(sdl3::render::BlendMode::Blend);
